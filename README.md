@@ -2,10 +2,19 @@
 
 # pivotaltracker-clubhouse
 Simple tool to transfer stories from Pivotal Tracker to Clubhouse.
-
+s
 ## Python Package Dependencies
-I'm assuming you'll use pip to install them.
-* requests 2.7.0 or above
+I use `pip` and `pipenv` to manage dependencies, etc. If you're on MacOS I'd recommend using `brew` to install `pipenv`.
+
+Installing dependencies:
+```
+pipenv install
+```
+
+Running script:
+```
+pipenv run python ./pivotaltracker-clubhouse --ptoken "<pivotal_token>" --ctoken "<clubhouse_token>" --pproject "<pivotal_project_id>" --cproject "<clubhouse_project_id>"
+```
 
 ## Usage
 ```
