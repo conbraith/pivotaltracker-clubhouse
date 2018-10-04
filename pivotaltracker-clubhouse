@@ -2,6 +2,7 @@
 
 import argparse
 import requests
+import time
 
 
 def _run():
@@ -25,6 +26,7 @@ def _run():
                 print ' {}, type: {}'.format(story['name'], story['story_type'])
         else:
             _upload_batch(cstories, args.ctoken)
+            time.sleep(30) # rate limit is 200 req per min
         offset += limit
 
 
