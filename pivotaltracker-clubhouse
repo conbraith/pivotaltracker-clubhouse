@@ -8,12 +8,12 @@ def _run():
     args = _get_args()
     purl = 'https://www.pivotaltracker.com/services/v5/projects/{0}/stories'.format(args.pproject)
     pheaders = {'X-TrackerToken': args.ptoken}
-    pquery = {'filter': 'type:feature,chore,bug AND -state:accepted AND label:clubhouse'}
+    pquery = {'filter': 'type:feature,chore,bug AND -state:accepted'}
     offset = 0
     response = requests.get(purl, headers=pheaders, params=pquery)
     assert response.status_code == 200, response.text
-    total = int(response.headers['x-tracker-pagination-total'])
-    limit = int(response.headers['x-tracker-pagination-limit'])
+    total = int(response.headers['X-Tracker-Pagination-Total'])
+    limit = int(response.headers['X-Tracker-Pagination-Limit'])
 
     while offset < total:
         print "offset={0}, batch_size={1}, total={2}".format(offset, limit, total)
@@ -30,7 +30,7 @@ def _run():
 
 def _upload_batch(cstories, ctoken):
     response = requests.post(
-        'https://api.clubhouse.io/api/v1/stories/bulk',
+        'https://api.clubhouse.io/api/v2/stories/bulk',
         params = {'token': ctoken},
         json = {'stories': cstories},
     )
@@ -42,9 +42,9 @@ def _fetch_batch(offset, purl, pheaders, pquery):
     response = requests.get(purl, headers=pheaders, params=pquery)
     assert response.status_code == 200, response.text
     pstories = response.json()
-    limit = int(response.headers['x-tracker-pagination-limit'])
-    offset = int(response.headers['x-tracker-pagination-offset'])
-    total = int(response.headers['x-tracker-pagination-total'])
+    limit = int(response.headers['X-Tracker-Pagination-Limit'])
+    offset = int(response.headers['X-Tracker-Pagination-Offset'])
+    total = int(response.headers['X-Tracker-Pagination-Total'])
     return pstories, limit, offset, total
 
 
