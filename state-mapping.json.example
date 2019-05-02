@@ -1,0 +1,10 @@
+{
+  "unstarted": 500000044,
+  "unscheduled": 500000044,
+  "planned": 500000043,
+  "started": 500000042,
+  "rejected": 500000042,
+  "delivered": 500000046,
+  "finished": 500000046,
+  "accepted": 500000047
+}

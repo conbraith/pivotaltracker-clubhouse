@@ -3,43 +3,118 @@
 import argparse
 import requests
 import time
+import json
 
+default_user_id="5c33cdad-8dbe-4f19-a819-b95465c10942"
 
 def _run():
     args = _get_args()
     purl = 'https://www.pivotaltracker.com/services/v5/projects/{0}/stories'.format(args.pproject)
     pheaders = {'X-TrackerToken': args.ptoken}
-    pquery = {'filter': 'type:feature,chore,bug AND -state:accepted'}
+    pquery = {'filter': 'type:feature,chore,bug AND created_before:2018-09-01', 'limit': '100'}
     offset = 0
     response = requests.get(purl, headers=pheaders, params=pquery)
     assert response.status_code == 200, response.text
     total = int(response.headers['X-Tracker-Pagination-Total'])
     limit = int(response.headers['X-Tracker-Pagination-Limit'])
+    state_map = _load_state_map(default={})
+
+    pivotal_users = _get_pivotal_users()
+    pivotal_users_dict = _get_pivotal_users_dict(pivotal_users)
+    clubhouse_users = _get_clubhouse_users()
+
+    users = _get_all_users(pivotal_users, clubhouse_users)
 
     while offset < total:
         print "offset={0}, batch_size={1}, total={2}".format(offset, limit, total)
         pstories, limit, offset, total = _fetch_batch(offset, purl, pheaders, pquery)
-        cstories = [_convert_story(pstory, args.cproject) for pstory in pstories]
+        cstories = filter(lambda i: not i is None, [_convert_story(pstory, users=users, cproject=args.cproject, pivotal_users_dictionary=pivotal_users_dict, state_map=state_map) for pstory in pstories])
+        # print json.dumps(cstories,indent=2)
         if args.dry_run:
             print '{} total stories retrieved: '.format(len(cstories))
-            for story in cstories:
-                print ' {}, type: {}'.format(story['name'], story['story_type'])
+            # for story in cstories:
+            #     # print '{}'.format(json.dumps(story.get('owner_ids'), indent=2))
+            #     print ' {}, type: {}, {} comments'.format(story.get('name').encode('utf-8').strip(), story['story_type'], len(story.get('comments')))
         else:
+            # print json.dumps(cstories, indent=4)
             _upload_batch(cstories, args.ctoken)
             time.sleep(30) # rate limit is 200 req per min
         offset += limit
 
+def _load_state_map(default):
+    file = open('./state-mapping.json')
+    try:
+        return json.loads(file.read())
+    except:
+        return default
+
+def _get_clubhouse_users():
+    args = _get_args()
+    url = 'https://api.clubhouse.io/api/v2/members'
+    print 'Fetching Clubhouse users {}'.format(url)
+    response = requests.get(url, params = {'token': args.ctoken})
+
+    return response.json()
+
+def _get_pivotal_users():
+    args = _get_args()
+    url = 'https://www.pivotaltracker.com/services/v5/projects/{}/memberships'.format(args.pproject)
+    print 'Fetching Pivotal users {}'.format(url)
+    pheaders = {'X-TrackerToken': args.ptoken}
+    response = requests.get(url, headers=pheaders)
+    return response.json()
+
+def _get_pivotal_users_dict(users):
+    users_dict = {}
+    for user in users:
+        users_dict[user.get('person').get('id')] = user
+    return users_dict
+
+def _get_all_users(pivotal_users, clubhouse_users):
+    dict = {}
+    for pUser in pivotal_users:
+        user_email = pUser.get('person').get('email')
+        if user_email:
+            dict[user_email] = { 'pivotal': pUser }
+        # else:
+            # print 'Pivotal user does not have an email: {}'.format(json.dumps(pUser, indent=2))
+    for cUser in clubhouse_users:
+        user_email = cUser.get('profile').get('email_address')
+        if user_email and dict.get(user_email):
+            dict[user_email]['clubhouse'] = cUser
+        # else:
+        #     print 'Clubhouse user does not have an email: {}'.format(json.dumps(cUser, indent=2))
+    return dict
+
+def _get_clubhouse_user_id(pivotal_user_id, pivotal_users, clubhouse_users):
+
+    return ''
+
+def _get_pivotal_comments(pstory):
+    args = _get_args()
+    url = 'https://www.pivotaltracker.com/services/v5/projects/{0}/stories/{1}/comments'.format(args.pproject, pstory.get('id'))
+    # print "  - Fetching comments from PivotalTracker {}".format(url)
+    headers = {'X-TrackerToken': args.ptoken}
+    response = requests.get(url, headers=headers)
+
+    assert response.status_code == 200, response.text
+
+    return response.json()
 
 def _upload_batch(cstories, ctoken):
+    print "Uploading to Clubhouse"
+    # print "{0}".format(json.dumps(cstories, indent=2))
     response = requests.post(
         'https://api.clubhouse.io/api/v2/stories/bulk',
         params = {'token': ctoken},
         json = {'stories': cstories},
     )
+    # print "Code: {0}; Text: {1}".format(response.status_code, response.text)
     assert response.status_code == 201, response.text
-
+    print "Successfully uploaded to Clubhouse"
 
 def _fetch_batch(offset, purl, pheaders, pquery):
+    print "Fetching stories from PivotalTracker {}".format(purl)
     pquery['offset'] = offset
     response = requests.get(purl, headers=pheaders, params=pquery)
     assert response.status_code == 200, response.text
@@ -72,20 +147,93 @@ def _get_args():
         '--cproject', required=True,
         help="The Clubhouse project ID to which to transfer stories.",
     )
+    parser.add_argument(
+        '--skip-duplicates', required=False, default=False,
+        help="Skip stories already added to Clubhouse",
+    )
+    parser.add_argument(
+        '--update-comments', required=False, default=False,
+        help="Update comments for stories in Clubhouse",
+    )
     return parser.parse_args()
 
+def _convert_story(pstory, users, pivotal_users_dictionary, cproject, state_map):
+    args = _get_args()
+    skip = False
 
-def _convert_story(pstory, cproject):
-    return {
+    comments = _get_pivotal_comments(pstory)
+
+    if args.skip_duplicates:
+        skip = _get_clubhouse_story_by_name(name=str(pstory.get('name').encode('utf-8').strip()), pivotal_id=str(pstory.get('id')))
+    if args.update_comments and not skip is False:
+        _update_clubhouse_comments(skip, comments, pivotal_users_dict=pivotal_users_dictionary, users=users)
+
+    if skip:
+        print "SKIPPING - [{}] {}".format(pstory.get('name', 'Untitled').encode('utf-8').strip(), skip)
+        return
+    story = {
         'name': pstory.get('name', 'Imported from Pivotal Tracker'),
-        'project_id': cproject,
+        'project_id': int(cproject),
         'description': pstory.get('description', ''),
         'external_id': str(pstory.get('id', '')),
         'labels': [_convert_label(plabel) for plabel in pstory.get('labels', [])] + [{'name': 'pivotal'}],
         'story_type': pstory.get('story_type'),
         'tasks': [_convert_task(ptask) for ptask in pstory.get('tasks', [])],
+        'created_at': pstory.get('created_at'),
+        'updated_at': pstory.get('updated_at'),
+        'comments': filter(lambda i: not i.get('text') is None and not i.get('text') == "", [_convert_comment(comment, users=users, pivotal_users_dict=pivotal_users_dictionary) for comment in comments]),
+        'owner_ids': filter(lambda i: not i is None, [_get_clubhouse_id(id, users=users, pivotal_users=pivotal_users_dictionary) for id in pstory.get('owner_ids')]),
+        'requested_by_id': _get_clubhouse_id(pstory.get('requested_by_id'), users=users, pivotal_users=pivotal_users_dictionary, default = default_user_id),
+        'estimate': int(pstory.get('estimate')) if not pstory.get('estimate') == None else None,
+        'workflow_state_id': state_map.get(pstory.get('current_state'), None)
     }
+    print "[{}] {} - {} ({} comments)".format(story.get('story_type'), pstory.get('current_state'), story.get('name').encode('utf-8').strip(), len(story.get('comments')))
+    return story
 
+def _get_clubhouse_story_by_name(name, pivotal_id):
+    args = _get_args()
+    url = 'https://api.clubhouse.io/api/v2/search/stories'
+    params = {'token': args.ctoken, 'query': '"{}"'.format(name)}
+    response = requests.get(url, params=params)
+    assert response.status_code == 200, response.text
+    data = response.json().get('data')
+    if len(data) > 0:
+        if data[0].get('external_id') == pivotal_id:
+            return data[0].get('id')
+        else:
+            return False
+    else:
+        return False
+
+def _get_clubhouse_id(person_id, pivotal_users, users, default = None):
+    author_id = default
+    if person_id in pivotal_users.keys():
+        user = pivotal_users[person_id]
+        found_user = users.get(user.get('person').get('email'))
+        if found_user and found_user.get('clubhouse'):
+            author_id = found_user.get('clubhouse').get('id')
+    return author_id
+
+def _convert_comment(comment, pivotal_users_dict, users):
+    pivotal_user = pivotal_users_dict.get(comment.get('person_id'))
+    comment_text = comment.get('text')
+    author_id = _get_clubhouse_id(comment.get('person_id'), pivotal_users=pivotal_users_dict, users=users, default = default_user_id)
+
+    if author_id == "":
+        author_id = default_user_id
+    if pivotal_user:
+        if not comment.get('text') is None:
+            comment_text = '**Imported Pivotal comment from user {}**\n\n{}'.format(pivotal_user.get('person').get('name'), comment.get('text').encode('utf-8').strip())
+        else:
+            comment_text == ""
+
+    return {
+        'author_id': author_id,
+        'created_at': comment.get('created_at'),
+        'updated_at': comment.get('updated_at'),
+        'external_id': str(comment.get('id')),
+        'text': comment_text
+    }
 
 def _convert_task(ptask):
     return {
@@ -99,6 +247,28 @@ def _convert_label(plabel):
         'name': plabel['name'],
     }
 
+
+def _update_clubhouse_comments(clubhouse_id, pivotal_comments, pivotal_users_dict, users):
+    if len(pivotal_comments) == 0:
+        return
+    args = _get_args()
+    params={'token':args.ctoken}
+    url = 'https://api.clubhouse.io/api/v2/stories/{}'.format(clubhouse_id)
+    print "Fetching comments {}".format(url)
+    response = requests.get(url, params=params)
+    assert response.status_code == 200, json.dumps(response.json(),indent=2)
+
+    data = response.json()
+    if data and len(data.get('comments')) != len(pivotal_comments):
+        pivotal_comment_ids = map(lambda i: i.get('external_id'), data.get('comments'))
+        for comment in pivotal_comments:
+            if not comment.get('id') in pivotal_comment_ids:
+                response = requests.post(
+                    'https://api.clubhouse.io/api/v2/stories/{}/comments'.format(clubhouse_id),
+                    params = {'token': args.ctoken},
+                    json = _convert_comment(comment, pivotal_users_dict=pivotal_users_dict, users=users),
+                )
+    # post_url = 'https://api.clubhouse.io/api/v2/stories/{}/comments'.format(clubhouse_id)
 
 if __name__ == '__main__':
     _run()
