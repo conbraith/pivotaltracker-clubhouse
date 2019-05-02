@@ -60,3 +60,4 @@ Stories in Pivotal are preserved, not deleted.
 ## State-mapping
 
 - Retrieve workflow from Clubhouse: https://api.clubhouse.io/api/v2/workflows
+- Update `state-mapping.json` (see `state-mapping.json.example`)
