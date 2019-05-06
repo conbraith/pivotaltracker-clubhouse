@@ -5,8 +5,6 @@ import requests
 import time
 import json
 
-default_user_id="5c33cdad-8dbe-4f19-a819-b95465c10942"
-
 def _run():
     args = _get_args()
     purl = 'https://www.pivotaltracker.com/services/v5/projects/{0}/stories'.format(args.pproject)
@@ -155,6 +153,11 @@ def _get_args():
         '--update-comments', required=False, default=False,
         help="Update comments for stories in Clubhouse",
     )
+    parser.add_argument(
+        '--default-user', required=False, default="5c33cdad-8dbe-4f19-a819-b95465c10942",
+        help="Default user ID if none is found to associate to",
+    )
+
     return parser.parse_args()
 
 def _convert_story(pstory, users, pivotal_users_dictionary, cproject, state_map):
@@ -183,7 +186,7 @@ def _convert_story(pstory, users, pivotal_users_dictionary, cproject, state_map)
         'updated_at': pstory.get('updated_at'),
         'comments': filter(lambda i: not i.get('text') is None and not i.get('text') == "", [_convert_comment(comment, users=users, pivotal_users_dict=pivotal_users_dictionary) for comment in comments]),
         'owner_ids': filter(lambda i: not i is None, [_get_clubhouse_id(id, users=users, pivotal_users=pivotal_users_dictionary) for id in pstory.get('owner_ids')]),
-        'requested_by_id': _get_clubhouse_id(pstory.get('requested_by_id'), users=users, pivotal_users=pivotal_users_dictionary, default = default_user_id),
+        'requested_by_id': _get_clubhouse_id(pstory.get('requested_by_id'), users=users, pivotal_users=pivotal_users_dictionary, default = args.default_user),
         'estimate': int(pstory.get('estimate')) if not pstory.get('estimate') == None else None,
         'workflow_state_id': state_map.get(pstory.get('current_state'), None)
     }
@@ -215,12 +218,13 @@ def _get_clubhouse_id(person_id, pivotal_users, users, default = None):
     return author_id
 
 def _convert_comment(comment, pivotal_users_dict, users):
+    args = _get_args()
     pivotal_user = pivotal_users_dict.get(comment.get('person_id'))
     comment_text = comment.get('text')
-    author_id = _get_clubhouse_id(comment.get('person_id'), pivotal_users=pivotal_users_dict, users=users, default = default_user_id)
+    author_id = _get_clubhouse_id(comment.get('person_id'), pivotal_users=pivotal_users_dict, users=users, default = args.default_user)
 
     if author_id == "":
-        author_id = default_user_id
+        author_id = args.default_user
     if pivotal_user:
         if not comment.get('text') is None:
             comment_text = '**Imported Pivotal comment from user {}**\n\n{}'.format(pivotal_user.get('person').get('name'), comment.get('text').encode('utf-8').strip())
