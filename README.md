@@ -36,6 +36,7 @@ required arguments:
                        stories.
   --cproject CPROJECT  The Clubhouse project ID to which to transfer stories.
   --dry-run True       Dry run
+  --default-user ID    Default user to associate stories to if none is found
 ```
 
 ## API Token Retrieval Instructions
