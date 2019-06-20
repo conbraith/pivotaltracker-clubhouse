@@ -37,6 +37,7 @@ required arguments:
   --cproject CPROJECT  The Clubhouse project ID to which to transfer stories.
   --dry-run True       Dry run
   --default-user ID    Default user to associate stories to if none is found
+  --skip-duplicates    Skip stories already imported
 ```
 
 ## API Token Retrieval Instructions
@@ -46,15 +47,22 @@ required arguments:
 
 ## Notes
 
-Only non-accepted stories in Pivotal are transferred. Release-type stories are not transferred. Some basic information, such as
-the name, story type, tasks, and labels are preserved. Not all information is preserved. See the code for details.
+Not all information is preserved. See the code for precise details.
 
-If you run the tool multiple times, you will have duplicate stories.
-You can easily bulk archive stories in Clubhouse before using the tool again,
-but if you want them permanently deleted, it won't be so easy (but
-archiving is probably sufficient to keep it uncluttered). An additional label
-"pivotal" is attached to each imported story, and the Clubhouse story
-`external_id` is set to the ID of the Pivotal story.
+You can adjust what's pulled from Pivotal by changing `pquery` in the `_run`
+method. It just hits the Pivotal API, so you have lots of options. By default,
+it pulls all features, chores and bugs.
+
+This will import stories and comments and associate both to users. If a user
+doesn't have a Clubhouse account, it will use the default user ID specified
+when running the command.
+
+If you run the tool multiple times, you will have duplicate stories unless
+you use the `skip-duplicates` features. Obviously enough, if you change
+the implementation, you'll need to re-address how you proceed.
+
+An additional label "pivotal" is attached to each imported story,
+and the Clubhouse story `external_id` is set to the ID of the Pivotal story.
 
 Stories in Pivotal are preserved, not deleted.
 
